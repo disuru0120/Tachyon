@@ -1,1 +1,3 @@
-java -classpath ".;./target/classes;./jars/commons-cli-1.4.jar;./jars/httpcore-4.3.3.jar;./jars/httpclient-4.3.6.jar;./jars/commons-codec-1.6.jar;./jars/commons-logging-1.1.3.jar" Tachyon -url https://storage.googleapis.com/vimeo-test/work-at-vimeo-2.mp4 -o ./work.mp4 -c 4
+mkdir \target\classes
+javac -cp ".;./jars/*" ./src/*.java -d ./target/classes/
+java -cp ".;./target/classes;./jars/*" Tachyon -url https://storage.googleapis.com/vimeo-test/work-at-vimeo-2.mp4 -o ./work.mp4 -c 4
