@@ -76,7 +76,7 @@ public final class Crc32c implements Checksum {
       0xbe2da0a5, 0x4c4623a6, 0x5f16d052, 0xad7d5351
   };
 
-  private static final long LONG_MASK = 0xffffffffL;
+  public static final long LONG_MASK = 0xffffffffL;
   private static final long BYTE_MASK = 0xff;
 
   private long crc;
@@ -133,7 +133,22 @@ public final class Crc32c implements Checksum {
     }
     return result;
   }
-
+  
+  /**
+   * Returns the value of the checksum.
+   * @param crc
+   * @return the 4-byte array representation of the checksum in network byte order (big endian).
+   */
+  static public byte[] getValueAsBytes(long _crc) {
+	 long value = _crc;
+	 byte[] result = new byte[4];
+	 for (int i = 3; i >= 0; i--) {
+	   result[i] = (byte) (value & 0xffL);
+	   value >>= 8;
+	 }
+	 return result;
+  }
+  
   /**
    * Resets the crc.
    */
@@ -147,4 +162,17 @@ public final class Crc32c implements Checksum {
     int index = (int) ((crc ^ b) & BYTE_MASK);
     return (CRC_TABLE[index] ^ (crc >> 8)) & LONG_MASK;
   }
+  
+  /**
+   * combine 2 (sequential ??) crc32c's 
+   * @param crc1
+   * @param crc2
+   * @param len2 length of crc2 in bytes
+   * @return
+   */
+  public static long combine(long crc1, long crc2, long len2) {
+	  // TODO
+	  return -1;
+  }
+  
 }
