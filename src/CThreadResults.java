@@ -1,12 +1,17 @@
 import java.util.zip.Checksum;
 
+/**
+ * 
+ * Contains Results and Stats produced by running a {@link ChunkThread}   
+ *
+ */
 public class CThreadResults {
-	public int id;
+	public int id;  // chunk/thread id
 	public long bytesDownloaded;
 	public Checksum checksum;
 	public boolean finished;
 	public int msg = UNKNOWN;
-	public int runCount = 0;
+	public int runCount = 0; // this CThreadResults produced by the "runCount"th attempt of the thread 
 
 	public CThreadResults(int id, int runCount, long bytesDownloaded, Checksum checksum, boolean finished, int msg) {
 		this.bytesDownloaded = bytesDownloaded;

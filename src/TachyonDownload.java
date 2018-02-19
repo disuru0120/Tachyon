@@ -1,14 +1,22 @@
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.UnknownHostException;
 import java.nio.channels.FileChannel;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -27,8 +35,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import javax.net.ssl.SSLException;
+//import javax.net.ssl.SSLException;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.http.Header;
@@ -46,13 +56,15 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.protocol.HttpContext;
 
+/**
+ * 
+ * Download a single file given URL and save location
+ *
+ */
 public class TachyonDownload {
 	private String URL;
 	private long fsize; // file size in bytes. Bytes 0 to fsize-1
-	// static private long chunkSize = 1024*100; // breakup the file into
-	// smaller units of this size
-	// static private int nChunks; // total number of chunks: size/chunkSize
-	private int nConnections = 4; // concurrent connections: number of chunks
+	private int nConnections; // concurrent connections: number of chunks
 									// we'll download in parallel. Will be used
 									// for both number of connections and number
 									// of concurrent threads. May get decreased later due to server-imposed limits
@@ -60,6 +72,7 @@ public class TachyonDownload {
 	private long chunkSize;
 	private String serverChecksum = "";
 	private final CloseableHttpClient httpclient;
+	private final String path;
 	
 	private CloseableHttpClient buildHttpClient() {
 		// Connections pool
@@ -72,8 +85,13 @@ public class TachyonDownload {
 				.build();
 	}
 	
+	/**
+	 * Do a preliminary GET request to determine the download setting, like whether the server supports multipart downloads
+	 * @return {@link CThreadHints} parameters that'll be passed to chunks worker threads {@link ChunkThread}
+	 * @throws Exception
+	 */
 	private CThreadHints getCThreadhints() throws Exception {
-		CThreadHints cthints = null;
+		CThreadHints ctHints = null;
 		boolean acceptsRanges = false;
 		HttpGet httpGet = new HttpGet(this.URL);
 		httpGet.addHeader(HttpHeaders.ACCEPT_ENCODING, "gzip, deflate, sdch");
@@ -117,7 +135,7 @@ public class TachyonDownload {
 			}
 			
 			chunkSize = (long) Math.ceil(fsize * 1.0 / nConnections);
-			cthints = new CThreadHints(URL, fsize, chunkSize, acceptsRanges);
+			ctHints = new CThreadHints(URL, fsize, chunkSize, acceptsRanges, path);
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
@@ -128,11 +146,17 @@ public class TachyonDownload {
 				e.printStackTrace();
 			}
 		}
-		return cthints;
+		return ctHints;
 	}
 	
 
-	private boolean foo(CThreadHints dlinfo) throws Exception {
+	/**
+	 * 
+	 * @param ctHints A CThreadHints object which contains parameters to pass to chunk worker threads
+	 * @return true if all chunks downloaded successfully
+	 * @throws Exception
+	 */
+	private boolean downloadChuncks(CThreadHints ctHints) throws Exception {
 		System.out.println();
 		if (nConnections > 1) System.out.println("Trying with "+nConnections+" connections:");
 		CThreadResults [] successfulResults = new CThreadResults[nConnections];
@@ -149,7 +173,8 @@ public class TachyonDownload {
 		
 		nChunks = nConnections; //  we'll have as many chunks (.part files) as we have connections, even tho nConnections may have to get decreased later due to server-imposed limits
 		for (int i = 0; i < nConnections; ++i) {
-			ChunkThread ct = new ChunkThread(i, dlinfo, httpclient);
+			// TODO: use singleton pattern for ctHints instead
+			ChunkThread ct = new ChunkThread(i, ctHints, httpclient);
 			threads.add(ct);
 			futures.add(compService.submit(ct));
 		}
@@ -186,7 +211,7 @@ public class TachyonDownload {
 						futures.add(compService.submit(threads.get(newResult.id)));
 						break;
 					case CThreadResults.UNKNOWN:
-						if(newResult.runCount > 3) { // give up
+						if(newResult.runCount > Settings.CHUNK_ERROR_RETRY) { // give up
 							System.err.println(newResult.id+" failed too many times. Giving up!!");
 						} else {
 							System.err.println(newResult.id+" failed. will run again later");
@@ -232,23 +257,33 @@ public class TachyonDownload {
 		return true;
 	}
 	
-	public TachyonDownload(String url) throws Exception {
+	/**
+	 * Download a single file given URL and save location
+	 * @param url address of the file to be downloaded
+	 * @param saveAs Full path to output file
+	 * @param maxConnections If server supports parallel connections, use this many connections at most. may end up using fewer due to server restrictions
+	 * @throws Exception
+	 */
+	public TachyonDownload(String url, String saveAs, int maxConnections) throws Exception {
 		this.URL = url;
+		this.path = saveAs;
+		this.nConnections = Math.max(maxConnections, 1);
 		httpclient = buildHttpClient();
-		boolean success = false;
+//		boolean success = false;
 		Thread mergeThread = null;
 		try {
 			CThreadHints dlinfo = getCThreadhints();
 			mergeThread = new Thread(() -> {
 				try {
-					TachyonDownload.mergeChunks(nChunks, "", serverChecksum);
-					System.out.println("\n"+this.URL+" download successful");
+					String savedPath = TachyonDownload.mergeChunks(nChunks, saveAs+"_0.part");
+					System.out.println("\n"+this.URL+" download successful.\n");
+					validateFile(savedPath, serverChecksum);
 				} catch (Exception e) {
 					System.out.println("merging failed");
 					e.printStackTrace();
 				}
 			});
-			if (foo(dlinfo))
+			if (downloadChuncks(dlinfo))
 				mergeThread.start();
 		} catch (Exception e) {
 			System.err.println("downloaded failed");
@@ -262,7 +297,7 @@ public class TachyonDownload {
 	
 	/**
 	 * Dictates what to do if httplclient.execute(request) failed
-	 * @return
+	 * @return HttpRequestRetryHandler used to configure an HttpClient object
 	 */
 	private HttpRequestRetryHandler buildRetryHandle() {
 		return new HttpRequestRetryHandler() {
@@ -270,7 +305,7 @@ public class TachyonDownload {
 			public boolean retryRequest(IOException exception, int executionCount, HttpContext context) {
 				System.out.println("retrying to connect... ("+executionCount+")");
 				System.err.println(exception.getMessage());
-		        if (executionCount >= 5) {
+		        if (executionCount >= Settings.CONNECTION_ERROR_RETRY) {
 		            // Do not retry if over max retry count
 		            return false;
 		        }
@@ -286,10 +321,11 @@ public class TachyonDownload {
 		            // Connection refused
 		            return false;
 		        }
-		        if (exception instanceof SSLException) {
-		            // SSL handshake exception
-		            return false;
-		        }
+//		        if (exception instanceof SSLException) {
+//		            // SSL handshake exception
+//		            return false;
+//		        }
+
 		        HttpClientContext clientContext = HttpClientContext.adapt(context);		        
 		        HttpRequest request = clientContext.getRequest();
 		        boolean idempotent = !(request instanceof HttpEntityEnclosingRequest);
@@ -335,39 +371,95 @@ public class TachyonDownload {
 
 		return ret;
 	}
-
-	private static void mergeChunks(int num, String path, String serverChecksum) throws IOException, NoSuchAlgorithmException {
+	
+	/**
+	 * merge downloaded chunks (.part files) <br>
+	 * Expecting parts filenames to have the format x_0.part, x_2.part2 ... x_n-1.part <br>
+	 * .part files will be deleted upon success
+	 * @param num number of chunks to merge
+	 * @param path path to 0th .part file. All n chunks must be present in the directory
+	 * @return path to output file or "" if failed
+	 * @throws IOException
+	 * @throws NoSuchAlgorithmException
+	 */
+	private static String mergeChunks(int num, String path) throws IOException {
+		String outname = "";
+		System.out.println();
 		if (num > 1) {
 			System.out.println("Merging chunks...");
-			FileOutputStream p0 = null;
 			FileInputStream partFile = null;
+			File p0file = new File(path);
+	
+			if (!(p0file.exists() && p0file.isFile()) && path.endsWith("_0.part")) {
+				System.err.println("invalid path");
+				return outname;
+			}
+			
+			String rawName = p0file.getName().replace("_0.part", "");
+			final Pattern pattern = Pattern.compile(rawName+"_\\d+?.part");
+			String[] files = new File(p0file.getParent()).list(new FilenameFilter() {			
+				@Override
+				public boolean accept(File dir, String name) {
+					int beg = -1, end = -1; 
+					Matcher matcher = pattern.matcher(name);
+					while (matcher.find()) {
+						beg = matcher.start();
+						end = matcher.end();
+						break;
+					}					
+					return beg==0 && end==name.length() && new File(dir.getAbsolutePath()+"\\"+name).isFile();
+				}
+			});
+			
+			if(files.length != num) {
+				System.err.println("missing .part files");
+				return outname;
+			}
+
+			FileOutputStream p0 = null; // 0th part
 			try {
-				p0 = new FileOutputStream("p0.part", true);
+				// append all parts to end of 0th part
+				p0 = new FileOutputStream(path, true);
 				FileChannel p0ch = p0.getChannel();
 				for (int i = 1; i < num; i++) {
-					partFile = new FileInputStream("p" + i + ".part");
+					partFile = new FileInputStream(p0file.getParent()+"\\"+rawName + "_" + i + ".part");
 					FileChannel partCh = partFile.getChannel();
 					p0.getChannel().transferFrom(partCh, p0ch.position(), partCh.size());
-					System.out.println(partCh.size());
 					p0ch.force(false);
+					System.out.println("merged part " + i + "  "+partCh.size()+" bytes");
 					partFile.close();
-					System.out.println("merged p" + i);
 				}
+
 				System.out.println("Merging Done!!");
+				System.out.println("deleting .part files");
+				for (int i = 1; i < num; i++) 
+					new File(p0file.getParent()+"\\"+rawName + "_" + i + ".part").delete();				
 
 			} catch (Exception e) {
 				System.err.println("Merge Error: " + e.getMessage());
 				e.printStackTrace();
-
 			} finally {
 				if (p0 != null)
 					p0.close();
 				if (partFile != null)
 					partFile.close();
+				try {
+					File target = new File(p0file.getParent()+"\\"+rawName);
+					if (target.exists() && target.isFile()) {
+						System.err.println("found file with same name, will overwrite");
+						target.delete();
+					}
+					outname = Files.move(p0file.toPath(), p0file.toPath().resolveSibling(rawName)).toFile().getAbsolutePath();			
+				}
+				catch (Exception e) {
+					e.printStackTrace();
+					System.err.println(e.getMessage());
+				}
 			}
 		}
 		
-		validateFile("p0.part", serverChecksum);
+		System.out.println("Saved as: " + outname);
+		return outname;
 	}
 	
 	/**
@@ -376,6 +468,7 @@ public class TachyonDownload {
 	 * @throws IOException
 	 */
 	private static String validateFile(String path, String serverChecksum) throws IOException {
+		System.out.println("Checking file integrity...");
 		String ourChecksum = ""; 
 		BufferedInputStream bufferIn = null;
 		try {

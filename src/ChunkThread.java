@@ -11,31 +11,48 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 
+/**
+ * 
+ * A worker thread that gets parameters via a {@link CThreadHints} object, downloads a chunk, and return the results 
+ * via a {@link CThreadHints} object
+ * <br>
+ * Caller should keep object to reschedule and resume chunk download
+ * <br>
+ * Will return a {@link CThreadResults} object on each trial
+ * 
+ */
 public class ChunkThread implements Callable<CThreadResults> {
 	private final CloseableHttpClient httpClient;
 	private final HttpGet httpget;
 	private int runCount = 0; // keep track of call times (retries) for each chunk 
-	private final int id;
+	private final int id; // A sequential number to identify this Chunk/thread
 	private final long startByte;
 	private final long endByte;
 	private final boolean doCheckRange;
 	private final boolean acceptsRanges;
-	
 	private Crc32c crc;
 	private long last_saved_byte = -1; // should be between in range [0, this chunk's size)
 
 	private final int BUFSIZE = 1024 * 256;
+	private final String path;
 
-	public ChunkThread(int id, CThreadHints dlinfo, CloseableHttpClient httpClient) {
+	/**
+	 *
+	 * @param id A sequential number to identify this Chunk/thread
+	 * @param ctHints {@link CThreadHints} contains parameters like URL and chunk save location
+	 * @param httpClient used to make GET requests
+	 */
+	public ChunkThread(int id, CThreadHints ctHints, CloseableHttpClient httpClient) {
 		this.httpClient = httpClient;
 		this.id = id;
-		this.acceptsRanges = dlinfo.acceptsRanges;
-		httpget = new HttpGet(dlinfo.URL);
+		this.path = ctHints.dir+"\\"+ctHints.fname;
+		this.acceptsRanges = ctHints.acceptsRanges;
+		httpget = new HttpGet(ctHints.URL);
 		crc = new Crc32c();
 		if (acceptsRanges) {
 			doCheckRange = true;
-			startByte = id * dlinfo.chunkSize;
-			endByte = Math.min((id + 1) * dlinfo.chunkSize - 1, dlinfo.fsize - 1);
+			startByte = id * ctHints.chunkSize;
+			endByte = Math.min((id + 1) * ctHints.chunkSize - 1, ctHints.fsize - 1);
 			httpget.addHeader(HttpHeaders.RANGE, "bytes=" + startByte + "-" + endByte);
 		} else {
 			doCheckRange = false;
@@ -81,7 +98,7 @@ public class ChunkThread implements Callable<CThreadResults> {
 						+ (entity.getContentLength() - (entity.getContentLength() / 1024) * 1024) + "B");
 				if (entity != null) {
 					bufferIn = new BufferedInputStream(entity.getContent(), BUFSIZE);
-					bufferOut = new BufferedOutputStream(new FileOutputStream("p" + id + ".part", acceptsRanges), BUFSIZE);
+					bufferOut = new BufferedOutputStream(new FileOutputStream(path+"_" + id + ".part", acceptsRanges), BUFSIZE);
 					byte[] data = new byte[BUFSIZE];
 
 
@@ -100,9 +117,9 @@ public class ChunkThread implements Callable<CThreadResults> {
 					result = new CThreadResults(id, runCount, last_saved_byte + 1, crc, true, CThreadResults.SUCCESS);		
 				}
 			} finally {
-				response.close();
-				bufferIn.close();
-				bufferOut.close();
+				if (response != null) response.close();
+				if (bufferIn != null) bufferIn.close();
+				if (bufferOut != null) bufferOut.close();
 			}
 
 			System.out.println(id + " - finished execution. saved " + (last_saved_byte + 1) + " Bytes");
@@ -111,9 +128,9 @@ public class ChunkThread implements Callable<CThreadResults> {
 			}
 		} catch (Exception e) {
 			System.err.println(id + " - Exception: " + e.getMessage());
+			e.printStackTrace();
 		}
 
 		return result;
 	}
 }
-
