@@ -487,10 +487,12 @@ public class TachyonDownload {
             ourChecksum = new String(b64.encode(Crc32c.getValueAsBytes(crc.getValue())));
             System.out.println("Crc32c checksum of merged: "+ ourChecksum);
             if(serverChecksum != null && !serverChecksum.isEmpty()) {
-                if (serverChecksum.equals(ourChecksum)) {
+                if (!serverChecksum.equals(ourChecksum)) {
                     System.err.println("Warning. File courrupt. Re-download Advised");
                     System.err.println("Checksum mismatch");
-                } 
+                } else {
+                	System.out.println("Checksums Matched.");
+                }
             } else {
                 System.err.println("Server's checksum not provided");
             }
