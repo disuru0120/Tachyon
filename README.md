@@ -1,5 +1,5 @@
 # Tachyon
-A multipart file downloader
+A multipart file downloader (aka. download accelerator)
 
 ## Building and Running the code:
 Make sure you're in the project directory<br>
@@ -16,5 +16,3 @@ Linux:<br>
 
 #### or you can run run.sh (for linux) or run.bat (windows) which should try to download the sample file provided using 4 connections and save it in the same directory
 
-
-Repo: [Tachyon](https://github.com/sam46/Tachyon)
