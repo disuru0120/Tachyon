@@ -156,7 +156,7 @@ public class TachyonDownload {
      * @return true if all chunks downloaded successfully
      * @throws Exception
      */
-    private boolean downloadChuncks(CThreadHints ctHints) throws Exception {
+    private boolean downloadChunks(CThreadHints ctHints) throws Exception {
         System.out.println();
         if (nConnections > 1) System.out.println("Trying with "+nConnections+" connections:");
         CThreadResults [] successfulResults = new CThreadResults[nConnections];
@@ -283,7 +283,7 @@ public class TachyonDownload {
                     e.printStackTrace();
                 }
             });
-            if (downloadChuncks(dlinfo))
+            if (downloadChunks(dlinfo))
                 mergeThread.start();
         } catch (Exception e) {
             System.err.println("downloaded failed");
@@ -491,7 +491,7 @@ public class TachyonDownload {
                     System.err.println("Warning. File courrupt. Re-download Advised");
                     System.err.println("Checksum mismatch");
                 } else {
-                	System.out.println("Checksums Matched.");
+                    System.out.println("Checksums Matched.");
                 }
             } else {
                 System.err.println("Server's checksum not provided");
