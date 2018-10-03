@@ -233,7 +233,7 @@ public class TachyonDownload {
         
         int downloadedChunkes = 0; 
         for(int i=0; i < successfulResults.length; i++) {
-            if (successfulResults[i] != null) downloadedChunkes++;
+            if (successfulResults[i] != null){ downloadedChunkes++};
         }
         System.out.println("Downloaded "+downloadedChunkes+"/"+nChunks+" chuncks");
         if (downloadedChunkes != nChunks) {
